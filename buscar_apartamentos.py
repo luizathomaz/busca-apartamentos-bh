@@ -21,6 +21,7 @@ BAIRROS = {
     "Vila Paris": "vila-paris",
     "Lourdes": "lourdes",
     "Funcionários": "funcionarios",
+    "Cidade Jardim": "cidade-jardim",
 }
 
 # Portais do mesmo grupo compartilham anúncios: um anúncio já listado num site

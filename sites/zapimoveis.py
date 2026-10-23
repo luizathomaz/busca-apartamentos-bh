@@ -8,6 +8,7 @@ SLUGS_ABREVIADOS = {
     "sao-pedro": "s-pedro",
     "santo-antonio": "sto-antonio",
     "vila-paris": "vl-paris",
+    "cidade-jardim": "cid-jardim",
 }
 
 

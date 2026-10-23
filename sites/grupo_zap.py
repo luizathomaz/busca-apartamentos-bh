@@ -120,14 +120,20 @@ def buscar(site, url_busca, bairros, quartos_min, preco_max, log=print):
 
     for nome, slug in bairros.items():
         vistos, pagina = {}, 1
-        while pagina <= MAX_PAGINAS:
-            novos = [i for i in _ler_pagina(sessao, url_busca(slug), quartos_min, preco_max, pagina)
-                     if i["codigo"] not in vistos]
-            if not novos:
-                break
-            vistos.update((i["codigo"], i) for i in novos)
-            pagina += 1
-            time.sleep(PAUSA)
+        try:
+            while pagina <= MAX_PAGINAS:
+                novos = [i for i in _ler_pagina(sessao, url_busca(slug), quartos_min, preco_max, pagina)
+                         if i["codigo"] not in vistos]
+                if not novos:
+                    break
+                vistos.update((i["codigo"], i) for i in novos)
+                pagina += 1
+                time.sleep(PAUSA)
+        except Exception as e:
+            # Um bairro com endereço errado no site não derruba a busca dos outros.
+            resumo[nome] = (f"FALHOU ({e})", 0)
+            log(f"  {nome}: falhou ({e})")
+            continue
 
         aprovados = 0
         for item in vistos.values():
