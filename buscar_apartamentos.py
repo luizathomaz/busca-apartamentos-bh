@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import historico
-from sites import netimoveis, vivareal, zapimoveis
+from sites import netimoveis, quintoandar, vivareal, zapimoveis
 
 QUARTOS_MIN = 2
 PRECO_MAX = 3500  # aluguel + condomínio, estritamente abaixo
@@ -29,6 +29,7 @@ SITES = {
     "Netimóveis": netimoveis,
     "VivaReal": vivareal,
     "ZAP Imóveis": zapimoveis,
+    "QuintoAndar": quintoandar,
 }
 
 PASTA_RESULTADOS = Path(__file__).parent / "resultados"

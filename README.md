@@ -1,6 +1,6 @@
 # Busca de apartamentos
 
-Procura apartamentos para alugar em Belo Horizonte no Netimóveis, VivaReal e ZAP Imóveis
+Procura apartamentos para alugar em Belo Horizonte no Netimóveis, VivaReal, ZAP Imóveis e QuintoAndar
 e salva cada rodada em `resultados/rodada_AAAA-MM-DD_HHhMM.txt`.
 
 Filtros (no topo de `buscar_apartamentos.py`): 2+ quartos, aluguel + condomínio abaixo de
