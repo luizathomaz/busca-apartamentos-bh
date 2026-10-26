@@ -44,18 +44,6 @@ def reais(v):
     return texto if centavos == "00" else f"{texto},{centavos}"
 
 
-def linha_imovel(ap):
-    return (f"Quartos: {ap['quartos']} | Banheiros: {ap['banheiros'] or 'não informado'} | "
-            f"Vagas: {ap['vagas'] or 0} | Área: {ap['area'] or 'não informada'}")
-
-
-def campos(ap):
-    return historico.campos_rastreados(
-        reais(ap["aluguel"]), reais(ap["condominio"]), reais(ap["iptu"]),
-        linha_imovel(ap), ap["descricao"],
-    )
-
-
 def formatar(ap, n):
     local = ap.get("endereco") or ", ".join(p for p in (ap["rua"], ap["bairro"], ap["cidade"]) if p)
     condominio = reais(ap["condominio"])
@@ -68,11 +56,11 @@ def formatar(ap, n):
 
     return "\n".join([
         f"[{n}] {ap['titulo']}",
-        f"Status:      {ap['status']}",
         f"Site:        {ap['site']} (código {ap['codigo']})",
         f"Anunciado:   {ap['anunciado']}",
         f"Localização: {local}",
-        linha_imovel(ap),
+        f"Quartos: {ap['quartos']} | Banheiros: {ap['banheiros'] or 'não informado'} | "
+        f"Vagas: {ap['vagas'] or 0} | Área: {ap['area'] or 'não informada'}",
         f"Aluguel:     {reais(ap['aluguel'])}",
         f"Condomínio:  {condominio}",
         f"TOTAL:       {reais(ap['total'])} /mês",
@@ -83,33 +71,24 @@ def formatar(ap, n):
     ])
 
 
-def classificar(aps, grupo, hist, mostrados_nesta_rodada):
-    """Separa os anúncios novos ou alterados dos que já apareceram.
+def classificar(aps, grupo, vistos, mostrados_nesta_rodada):
+    """Separa os anúncios que nunca apareceram dos que já saíram numa rodada anterior.
 
-    Retorna (a mostrar, quantos já vistos sem mudança, quantos já listados por outro site nesta rodada).
+    Retorna (a mostrar, quantos já vistos antes, quantos já listados por outro site nesta rodada).
     """
-    mostrar, sem_mudanca, de_outro_site = [], 0, 0
+    mostrar, ja_vistos, de_outro_site = [], 0, 0
     for ap in aps:
         chave = (grupo, ap["codigo"])
         if chave in mostrados_nesta_rodada:
             de_outro_site += 1
             continue
         mostrados_nesta_rodada.add(chave)
-
-        anterior = hist.get(chave)
-        if anterior is None:
-            ap["status"] = "NOVO"
-        else:
-            mudou = historico.mudancas(anterior["campos"], campos(ap))
-            if not mudou:
-                sem_mudanca += 1
-                continue
-            ap["status"] = (
-                f"MUDOU desde a rodada de {anterior['ultima_vez']:%d/%m/%Y %H:%M} "
-                f"(visto pela 1ª vez em {anterior['primeira_vez']:%d/%m/%Y}) - " + "; ".join(mudou)
-            )
+        # Mesmo que preço ou descrição tenham mudado, o anúncio não volta.
+        if chave in vistos:
+            ja_vistos += 1
+            continue
         mostrar.append(ap)
-    return mostrar, sem_mudanca, de_outro_site
+    return mostrar, ja_vistos, de_outro_site
 
 
 def secao(r):
@@ -122,11 +101,11 @@ def secao(r):
     if r["erro"]:
         return linhas + [f"Busca falhou neste site: {r['erro']}", ""]
 
-    no_filtro = len(r["mostrar"]) + r["sem_mudanca"] + r["de_outro_site"]
+    no_filtro = len(r["mostrar"]) + r["ja_vistos"] + r["de_outro_site"]
     linhas += [
         f"Dentro do filtro: {no_filtro}",
-        f"  - Novos ou alterados (listados abaixo): {len(r['mostrar'])}",
-        f"  - Já vistos em rodadas anteriores, sem mudança (omitidos): {r['sem_mudanca']}",
+        f"  - Novos (listados abaixo): {len(r['mostrar'])}",
+        f"  - Já vistos em rodadas anteriores (omitidos): {r['ja_vistos']}",
     ]
     if r["de_outro_site"]:
         linhas.append(f"  - Já listados em outro site do mesmo grupo nesta rodada (omitidos): {r['de_outro_site']}")
@@ -134,7 +113,7 @@ def secao(r):
     linhas += [f"  - {b}: {vistos} -> {ok}" for b, (vistos, ok) in r["resumo"].items()]
     linhas.append("")
     if not r["mostrar"]:
-        linhas += ["Nenhum anúncio novo ou alterado neste site.", ""]
+        linhas += ["Nenhum anúncio novo neste site.", ""]
     for n, ap in enumerate(sorted(r["mostrar"], key=lambda a: a["total"]), 1):
         linhas += ["-" * 90, formatar(ap, n), ""]
     return linhas
@@ -142,15 +121,15 @@ def secao(r):
 
 def main():
     inicio = datetime.now()
-    hist = historico.carregar(PASTA_RESULTADOS, {nome: m.GRUPO for nome, m in SITES.items()})
+    vistos = historico.carregar(PASTA_RESULTADOS, {nome: m.GRUPO for nome, m in SITES.items()})
     mostrados = set()
     resultados = []
     for nome, modulo in SITES.items():
         print(f"Buscando no {nome} ({len(BAIRROS)} bairros)...")
-        r = {"nome": nome, "mostrar": [], "sem_mudanca": 0, "de_outro_site": 0, "resumo": {}, "erro": None}
+        r = {"nome": nome, "mostrar": [], "ja_vistos": 0, "de_outro_site": 0, "resumo": {}, "erro": None}
         try:
             aps, r["resumo"] = modulo.buscar(BAIRROS, QUARTOS_MIN, PRECO_MAX)
-            r["mostrar"], r["sem_mudanca"], r["de_outro_site"] = classificar(aps, modulo.GRUPO, hist, mostrados)
+            r["mostrar"], r["ja_vistos"], r["de_outro_site"] = classificar(aps, modulo.GRUPO, vistos, mostrados)
         except Exception as e:
             print(f"  falhou: {e}")
             r["erro"] = e
@@ -163,10 +142,10 @@ def main():
         f"Rodada:  {inicio:%d/%m/%Y %H:%M}",
         f"Filtros: {QUARTOS_MIN}+ quartos | aluguel + condomínio abaixo de {reais(PRECO_MAX)}",
         f"Bairros: {', '.join(BAIRROS)}",
-        "Só aparecem anúncios novos ou que mudaram desde as rodadas anteriores.",
+        "Só aparecem anúncios que não saíram em nenhuma rodada anterior.",
         separador,
         "",
-        "Resumo (novos ou alterados):",
+        "Resumo (novos):",
     ]
     for r in resultados:
         linhas.append(f"  - {r['nome']}: {'FALHOU' if r['erro'] else len(r['mostrar'])}")
@@ -178,7 +157,7 @@ def main():
     arquivo = PASTA_RESULTADOS / f"rodada_{inicio:%Y-%m-%d_%Hh%M}.txt"
     arquivo.write_text("\n".join(linhas), encoding="utf-8")
     total = sum(len(r["mostrar"]) for r in resultados)
-    print(f"\n{total} apartamento(s) novos ou alterados. Resultado salvo em {arquivo}")
+    print(f"\n{total} apartamento(s) novos. Resultado salvo em {arquivo}")
 
 
 if __name__ == "__main__":
