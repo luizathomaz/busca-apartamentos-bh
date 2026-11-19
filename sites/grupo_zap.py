@@ -2,9 +2,12 @@
 import json
 import re
 import time
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
+
+from local import slug
 
 GRUPO = "grupo_zap"
 PAUSA = 1.0
@@ -25,6 +28,27 @@ def _nova_sessao():
     return requests.Session(impersonate="chrome")
 
 
+def _caminho_do_bairro(sessao, portal, local, bairro):
+    """Caminho do bairro na URL de aluguel do portal, ex.: '/aluguel/sp/sao-paulo/zona-oeste/pinheiros/'.
+
+    O formato muda de cidade para cidade (zona, abreviações), então vem do autocompletar do próprio site.
+    """
+    r = sessao.get(portal["api_locais"], timeout=30, params={
+        "portal": portal["nome_api"], "fields": "neighborhood", "size": 20,
+        "q": f"{bairro} {local.cidade}",
+        "includeFields": "address.neighborhood,address.city,address.stateAcronym,url",
+    }, headers={"x-domain": "." + portal["dominio"], "Origin": portal["base"], "Referer": portal["base"] + "/"})
+    r.raise_for_status()
+    for item in r.json()["neighborhood"]["result"]["locations"]:
+        endereco = item["address"]
+        if (item["url"].startswith("/aluguel/")
+                and slug(endereco.get("neighborhood", "")) == slug(bairro)
+                and slug(endereco.get("city", "")) == local.slug_cidade
+                and slug(endereco.get("stateAcronym", "")) == local.slug_uf):
+            return item["url"]
+    raise RuntimeError(f"bairro não encontrado no site para {local.cidade}-{local.uf}")
+
+
 def _texto(card, campo):
     el = card.select_one(f'[data-cy="rp-cardProperty-{campo}"]')
     return el.get_text(" ", strip=True) if el else ""
@@ -35,9 +59,35 @@ def _inteiro(texto):
     return int(m.group()) if m else None
 
 
+def _casar(cards, estruturados, url):
+    """Junta cada card aos dados estruturados do mesmo anúncio.
+
+    O card com link traz o código no próprio link. Alguns cards vêm sem link e alguns anúncios
+    faltam nos dados estruturados; as sobras dos dados seguem a ordem dos cards sem link.
+    """
+    por_codigo = {str(d.get("@id")): d for d in estruturados}
+    pares, sem_link = [], []
+    for card in cards:
+        a = card.find("a", href=True)
+        m = re.search(r"id-(\d+)", a["href"]) if a else None
+        if not m:
+            sem_link.append(card)
+            continue
+        codigo = m.group(1)
+        pares.append((card, por_codigo.pop(codigo, None) or {
+            "@id": codigo, "url": urljoin(url, a["href"]), "name": "Apartamento para alugar",
+        }))
+    sobras = list(por_codigo.values())
+    # Sem a mesma contagem não dá para saber qual card é qual; esses anúncios ficam de fora.
+    if len(sobras) == len(sem_link):
+        pares += zip(sem_link, sobras)
+    return pares
+
+
 def _ler_pagina(sessao, url, quartos_min, preco_max, pagina):
     params = {
-        "quartos": ",".join(str(q) for q in range(quartos_min, 5)),
+        # O site agrupa 4 ou mais quartos na opção 4.
+        "quartos": ",".join(str(q) for q in range(min(quartos_min, 4), 5)),
         # Só o aluguel; o condomínio é somado e filtrado depois.
         "precoMaximo": preco_max,
     }
@@ -57,12 +107,8 @@ def _ler_pagina(sessao, url, quartos_min, preco_max, pagina):
          if (s.string or "").lstrip().startswith("[")),
         [],
     )
-    # Alguns cards não trazem link; o JSON estruturado vem na mesma ordem dos cards.
-    if len(estruturados) != len(cards):
-        raise RuntimeError(f"página {pagina} de {url}: cards e dados estruturados não batem")
-
     itens = []
-    for card, dados in zip(cards, estruturados):
+    for card, dados in _casar(cards, estruturados, url):
         preco = _texto(card, "price-txt")
         aluguel_txt, _, resto = preco.partition("/")
         cond = re.search(r"Cond\.\s*(R\$\s*[\d.,]+)", resto)
@@ -112,17 +158,23 @@ def _data_criacao(texto):
     return f"{data} ({atualizado.group().strip()})" if atualizado else data
 
 
-def buscar(site, url_busca, bairros, quartos_min, preco_max, log=print):
-    """Retorna (anúncios que passam no filtro, resumo por bairro)."""
+def buscar(site, portal, local, bairros, quartos_min, preco_max, log=print):
+    """Retorna (anúncios que passam no filtro, resumo por bairro).
+
+    `portal` traz os endereços do site e `url_busca`, que monta a URL da listagem a partir
+    do caminho do bairro.
+    """
     sessao = _nova_sessao()
     nomes_aceitos = set(bairros)
     encontrados, vistos_global, resumo = [], set(), {}
 
-    for nome, slug in bairros.items():
+    for nome in bairros:
         vistos, pagina = {}, 1
         try:
+            url = portal["url_busca"](_caminho_do_bairro(sessao, portal, local, nome))
+            time.sleep(PAUSA)
             while pagina <= MAX_PAGINAS:
-                novos = [i for i in _ler_pagina(sessao, url_busca(slug), quartos_min, preco_max, pagina)
+                novos = [i for i in _ler_pagina(sessao, url, quartos_min, preco_max, pagina)
                          if i["codigo"] not in vistos]
                 if not novos:
                     break
@@ -130,7 +182,7 @@ def buscar(site, url_busca, bairros, quartos_min, preco_max, log=print):
                 pagina += 1
                 time.sleep(PAUSA)
         except Exception as e:
-            # Um bairro com endereço errado no site não derruba a busca dos outros.
+            # Um bairro que o site não encontra não derruba a busca dos outros.
             resumo[nome] = (f"FALHOU ({e})", 0)
             log(f"  {nome}: falhou ({e})")
             continue
@@ -160,7 +212,7 @@ def buscar(site, url_busca, bairros, quartos_min, preco_max, log=print):
             encontrados.append({
                 **item,
                 "site": site,
-                "cidade": "Belo Horizonte",
+                "cidade": local.cidade,
                 "endereco": endereco,
                 "anunciado": f"desde {criado_em}" if criado_em else "não informado pelo site",
                 "total": total,

@@ -1,32 +1,17 @@
-"""Busca apartamentos para alugar em Belo Horizonte e salva o resultado em resultados/."""
+"""Busca apartamentos para alugar com os filtros de config.py e salva o resultado em resultados/."""
+import sys
 import textwrap
 from datetime import datetime
 from pathlib import Path
 
+import config
 import historico
+from local import Local, slug
 from sites import netimoveis, quintoandar, vivareal, zapimoveis
-
-QUARTOS_MIN = 2
-PRECO_MAX = 3500  # aluguel + condomínio, estritamente abaixo
-
-BAIRROS = {
-    "São Bento": "sao-bento",
-    "Santo Antônio": "santo-antonio",
-    "São Pedro": "sao-pedro",
-    "Savassi": "savassi",
-    "Sion": "sion",
-    "Anchieta": "anchieta",
-    "Carmo": "carmo",
-    "Cruzeiro": "cruzeiro",
-    "Vila Paris": "vila-paris",
-    "Lourdes": "lourdes",
-    "Funcionários": "funcionarios",
-    "Cidade Jardim": "cidade-jardim",
-}
 
 # Portais do mesmo grupo compartilham anúncios: um anúncio já listado num site
 # anterior desta lista não se repete no seguinte.
-SITES = {
+TODOS_OS_SITES = {
     "Netimóveis": netimoveis,
     "VivaReal": vivareal,
     "ZAP Imóveis": zapimoveis,
@@ -120,15 +105,23 @@ def secao(r):
 
 
 def main():
+    desconhecidos = [s for s in config.SITES if s not in TODOS_OS_SITES]
+    if desconhecidos:
+        sys.exit(f"Site(s) desconhecido(s) em config.SITES: {', '.join(desconhecidos)}. "
+                 f"Opções: {', '.join(TODOS_OS_SITES)}.")
+    sites = {nome: TODOS_OS_SITES[nome] for nome in TODOS_OS_SITES if nome in config.SITES}
+    local = Local(config.CIDADE, config.ESTADO, config.UF)
+    bairros = {nome: slug(nome) for nome in config.BAIRROS}
+
     inicio = datetime.now()
-    vistos = historico.carregar(PASTA_RESULTADOS, {nome: m.GRUPO for nome, m in SITES.items()})
+    vistos = historico.carregar(PASTA_RESULTADOS, {nome: m.GRUPO for nome, m in TODOS_OS_SITES.items()})
     mostrados = set()
     resultados = []
-    for nome, modulo in SITES.items():
-        print(f"Buscando no {nome} ({len(BAIRROS)} bairros)...")
+    for nome, modulo in sites.items():
+        print(f"Buscando no {nome} ({len(bairros)} bairros)...")
         r = {"nome": nome, "mostrar": [], "ja_vistos": 0, "de_outro_site": 0, "resumo": {}, "erro": None}
         try:
-            aps, r["resumo"] = modulo.buscar(BAIRROS, QUARTOS_MIN, PRECO_MAX)
+            aps, r["resumo"] = modulo.buscar(local, bairros, config.QUARTOS_MIN, config.PRECO_MAX)
             r["mostrar"], r["ja_vistos"], r["de_outro_site"] = classificar(aps, modulo.GRUPO, vistos, mostrados)
         except Exception as e:
             print(f"  falhou: {e}")
@@ -138,10 +131,10 @@ def main():
     separador = "=" * 90
     linhas = [
         separador,
-        "PESQUISA DE APARTAMENTOS PARA ALUGAR - BELO HORIZONTE",
+        f"PESQUISA DE APARTAMENTOS PARA ALUGAR - {config.CIDADE.upper()}",
         f"Rodada:  {inicio:%d/%m/%Y %H:%M}",
-        f"Filtros: {QUARTOS_MIN}+ quartos | aluguel + condomínio abaixo de {reais(PRECO_MAX)}",
-        f"Bairros: {', '.join(BAIRROS)}",
+        f"Filtros: {config.QUARTOS_MIN}+ quartos | aluguel + condomínio abaixo de {reais(config.PRECO_MAX)}",
+        f"Bairros: {', '.join(bairros)}",
         "Só aparecem anúncios que não saíram em nenhuma rodada anterior.",
         separador,
         "",

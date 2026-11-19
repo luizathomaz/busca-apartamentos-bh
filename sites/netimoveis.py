@@ -23,15 +23,15 @@ def _valor(texto):
     return float(digitos) if digitos else None
 
 
-def _nova_sessao():
+def _nova_sessao(local):
     s = requests.Session()
     s.headers["User-Agent"] = USER_AGENT
     # A API só responde depois que a sessão tem os cookies da página de listagem.
-    s.get(f"{BASE}/locacao/minas-gerais/belo-horizonte/apartamento", timeout=30)
+    s.get(f"{BASE}/locacao/{local.slug_estado}/{local.slug_cidade}/apartamento", timeout=30)
     return s
 
 
-def _buscar_pagina(sessao, slug_bairro, pagina):
+def _buscar_pagina(sessao, local, slug_bairro, pagina):
     corpo = {
         "registrosPorPagina": POR_PAGINA,
         "timestampBusca": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
@@ -41,8 +41,8 @@ def _buscar_pagina(sessao, slug_bairro, pagina):
         "tipos": ["apartamento"],
         "caracteristicas": [],
         "localizacao": {
-            "urlEstado": "minas-gerais",
-            "urlCidade": "belo-horizonte",
+            "urlEstado": local.slug_estado,
+            "urlCidade": local.slug_cidade,
             # O site exige uma região na URL, mas filtra só pelo bairro.
             "urlRegiao": slug_bairro,
             "urlBairro": slug_bairro,
@@ -80,15 +80,15 @@ def _detalhes(sessao, link):
     return descricao, atualizado
 
 
-def buscar(bairros, quartos_min, preco_max, log=print):
+def buscar(local, bairros, quartos_min, preco_max, log=print):
     """Retorna (anúncios que passam no filtro, resumo por bairro)."""
-    sessao = _nova_sessao()
+    sessao = _nova_sessao(local)
     encontrados, codigos, resumo = [], set(), {}
 
     for nome, slug in bairros.items():
         vistos, pagina, total = [], 1, None
         while True:
-            total, itens = _buscar_pagina(sessao, slug, pagina)
+            total, itens = _buscar_pagina(sessao, local, slug, pagina)
             vistos.extend(itens)
             if not itens or len(vistos) >= total:
                 break
@@ -123,7 +123,7 @@ def buscar(bairros, quartos_min, preco_max, log=print):
                 "codigo": item.get("imovel_id"),
                 "titulo": item.get("titulo") or "",
                 "bairro": item.get("bairro") or nome,
-                "cidade": item.get("cidade") or "Belo Horizonte",
+                "cidade": item.get("cidade") or local.cidade,
                 "rua": item.get("logradouro") or "",
                 "quartos": item.get("quartos"),
                 "banheiros": item.get("banhos"),

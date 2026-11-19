@@ -36,11 +36,11 @@ def _next_data(sessao, url, completo, tentativas=3):
     raise RuntimeError(f"página veio incompleta {tentativas} vezes: {url}")
 
 
-def _area_de_busca(sessao, bairros):
+def _area_de_busca(sessao, local, bairros):
     """Retângulo do mapa que cobre todos os bairros, a partir da área que o site usa para cada um."""
     norte, sul, leste, oeste = [], [], [], []
     for nome, slug in bairros.items():
-        url = f"{BASE}/alugar/imovel/{slug}-belo-horizonte-mg-brasil"
+        url = f"{BASE}/alugar/imovel/{slug}-{local.slug_cidade}-{local.slug_uf}-brasil"
         try:
             vp = _next_data(sessao, url, lambda e: ((e.get("search") or {}).get("location") or {}).get("viewport"))["search"]["location"]["viewport"]
         except RuntimeError as e:
@@ -60,7 +60,7 @@ def _area_de_busca(sessao, bairros):
     return area, centro
 
 
-def _buscar_pagina(sessao, area, centro, quartos_min, preco_max, offset):
+def _buscar_pagina(sessao, local, area, centro, quartos_min, preco_max, offset):
     corpo = {
         "context": {"mapShowing": False, "listShowing": True, "numPhotos": 0, "isSSR": False},
         "filters": {
@@ -68,7 +68,7 @@ def _buscar_pagina(sessao, area, centro, quartos_min, preco_max, offset):
             "blocklist": [],
             "selectedHouses": [],
             "location": {"coordinate": centro, "viewport": area, "neighborhoods": [],
-                         "city": "Belo Horizonte", "countryCode": "BR"},
+                         "city": local.cidade, "countryCode": "BR"},
             # Só o aluguel; o condomínio é somado e filtrado depois.
             "priceRange": [{"costType": "RENT_PRICE", "range": {"max": preco_max}}],
             "specialConditions": [],
@@ -135,14 +135,14 @@ def _detalhes(sessao, codigo):
     }
 
 
-def buscar(bairros, quartos_min, preco_max, log=print):
+def buscar(local, bairros, quartos_min, preco_max, log=print):
     """Retorna (anúncios que passam no filtro, resumo por bairro)."""
     sessao = requests.Session(impersonate="chrome")
-    area, centro = _area_de_busca(sessao, bairros)
+    area, centro = _area_de_busca(sessao, local, bairros)
 
     vistos, offset = {}, 0
     while True:
-        total, itens = _buscar_pagina(sessao, area, centro, quartos_min, preco_max, offset)
+        total, itens = _buscar_pagina(sessao, local, area, centro, quartos_min, preco_max, offset)
         vistos.update((str(i["id"]), i) for i in itens)
         offset += POR_PAGINA
         if not itens or offset >= total:
@@ -186,7 +186,7 @@ def buscar(bairros, quartos_min, preco_max, log=print):
                 "codigo": codigo,
                 "titulo": det["titulo"],
                 "bairro": det["bairro"] or nome,
-                "cidade": "Belo Horizonte",
+                "cidade": local.cidade,
                 "rua": det["rua"],
                 "quartos": det["quartos"],
                 "banheiros": det["banheiros"],

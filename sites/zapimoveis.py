@@ -2,20 +2,16 @@ from sites import grupo_zap
 
 GRUPO = grupo_zap.GRUPO
 
-# O ZAP abrevia alguns nomes de bairro na URL.
-SLUGS_ABREVIADOS = {
-    "sao-bento": "s-bento",
-    "sao-pedro": "s-pedro",
-    "santo-antonio": "sto-antonio",
-    "vila-paris": "vl-paris",
-    "cidade-jardim": "cid-jardim",
+PORTAL = {
+    "nome_api": "ZAP",
+    "api_locais": "https://glue-api.zapimoveis.com.br/v3/locations",
+    "dominio": "zapimoveis.com.br",
+    "base": "https://www.zapimoveis.com.br",
+    # O autocompletar devolve a busca de todos os imóveis; a listagem só de apartamentos troca o tipo.
+    "url_busca": lambda caminho: "https://www.zapimoveis.com.br"
+                                 + caminho.replace("/aluguel/imoveis/", "/aluguel/apartamentos/", 1),
 }
 
 
-def _url_busca(slug):
-    slug = SLUGS_ABREVIADOS.get(slug, slug)
-    return f"https://www.zapimoveis.com.br/aluguel/apartamentos/mg+belo-horizonte++{slug}/"
-
-
-def buscar(bairros, quartos_min, preco_max, log=print):
-    return grupo_zap.buscar("ZAP Imóveis", _url_busca, bairros, quartos_min, preco_max, log)
+def buscar(local, bairros, quartos_min, preco_max, log=print):
+    return grupo_zap.buscar("ZAP Imóveis", PORTAL, local, bairros, quartos_min, preco_max, log)
